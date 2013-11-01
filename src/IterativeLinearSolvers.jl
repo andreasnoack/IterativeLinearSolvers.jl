@@ -2,11 +2,13 @@ module IterativeLinearSolvers
 
 using ToeplitzMatrices
 
-import Base.LinAlg: BlasReal
+import Base.LinAlg: BlasReal, A_mul_B!
 
 export cgs, cg, gmres
 
-function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::AbstractVector{T}, M::AbstractMatrix{T}, max_it::Integer, tol::Real)
+typealias Preconditioner{T} Union(AbstractMatrix{T}, Factorization{T})
+
+function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::AbstractVector{T}, M::Preconditioner{T}, max_it::Integer, tol::Real)
 #  -- Iterative template routine --
 #     Univ. of Tennessee and Oak Ridge National Laboratory
 #     October 1, 1993
@@ -39,21 +41,22 @@ function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstract
     iter = 0
 
     bnrm2 = norm(b)
-    if bnrm2 == 0.0 bnrm2 = 1.0 end
+    if bnrm2 == 0.0 bnrm2 = one(T) end
 
-    r = copy(b)
     z = zeros(T, n)
     q = zeros(T, n)
     p = zeros(T, n)
+    # r = copy(b)
     # A_mul_B!(-one(T),A,x,one(T),r)
-    r[:] -= A*x
+    r = b - A*x
     error = norm(r)/bnrm2
     if error < tol return end
 
     for iter = 1:max_it                       # begin iteration
 
         z[:] = r
-        solve!(M, z)
+        A_ldiv_B!(M, z)
+        # z[:] = M\r
         rho = dot(r,z)
 
         if iter > 1                       # direction vector
@@ -84,7 +87,7 @@ function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstract
     return x, error, iter, flag
 end
 
-function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::AbstractVector{T}, M::AbstractMatrix{T}, max_it::Integer, tol::Real)
+function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::AbstractVector{T}, M::Preconditioner{T}, max_it::Integer, tol::Real)
 #  -- Iterative template routine --
 #     Univ. of Tennessee and Oak Ridge National Laboratory
 #     October 1, 1993
@@ -117,18 +120,18 @@ function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstrac
 
     n = length(b)
     bnrm2 = norm(b)
-    if bnrm2 == 0.0 bnrm2 = 1.0 end
+    if bnrm2 == 0.0 bnrm2 = one(T) end
 
-    r = copy(b)
     u = zeros(T, n)
     p = zeros(T, n)
     p_hat = zeros(T, n)
     q = zeros(T, n)
     u_hat = zeros(T,n)
     v_hat = zeros(T, n)
-    rho = 0.0
-    # A_mul_B!(-one(T),A,x,one(T),r)
-    r[:] -= A*x
+    rho = zero(T)
+    r = copy(b)
+    A_mul_B!(-one(T),A,x,one(T),r)
+    # r = b - A*x
     error = norm(r)/bnrm2
 
     if error < tol return x, error, iter, flag end
@@ -152,22 +155,24 @@ function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstrac
         end
 
         p_hat[:] = p
-        solve!(M, p_hat)
-        # A_mul_B!(one(T),A,p_hat,zero(T),v_hat)    # adjusting scalars
-        v_hat[:] = A*p_hat
+        A_ldiv_B!(M, p_hat)
+        # p_hat[:] = M\p
+        A_mul_B!(one(T),A,p_hat,zero(T),v_hat)    # adjusting scalars
+        # v_hat[:] = A*p_hat
         alpha = rho/dot(r_tld,v_hat)
         for l = 1:n
             q[l] = u[l] - alpha*v_hat[l]
             u_hat[l] = u[l] + q[l]
         end
-        solve!(M, u_hat)
+        A_ldiv_B!(M, u_hat)
+        # u_hat[:] = M\u_hat
 
         for l = 1:n
             x[l] += alpha*u_hat[l]                 # update approximation
         end
 
-        # A_mul_B!(-alpha,A,u_hat,one(T),r)
-        r[:] -= alpha*(A*u_hat)
+        A_mul_B!(-alpha,A,u_hat,one(T),r)
+        # r[:] -= alpha*(A*u_hat)
         error = norm(r)/bnrm2           # check convergence
         if error <= tol break end
 
@@ -185,7 +190,7 @@ function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstrac
     return x, error, iter, flag
 end
 
-function gmres{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::AbstractVector{T}, M::AbstractMatrix{T}, restrt::Integer, max_it::Integer, tol::Real)
+function gmres{T<:BlasReal}(A::Any, b::AbstractVector{T}, x::AbstractVector{T} = randn(length(b)), M::Any = eye(Diagonal{T}, length(b)), restrt::Integer = length(b)|>t->min(t-1,int(10log10(t))), max_it::Integer = 1000, tol::Real = eps())
 #  -- Iterative template routine --
 #     Univ. of Tennessee and Oak Ridge National Laboratory
 #     October 1, 1993
@@ -218,16 +223,17 @@ function gmres{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstr
     flag = 0
 
     bnrm2 = norm(b)
-    if bnrm2 == 0.0 bnrm2 = 1.0 end
+    if bnrm2 == 0.0 bnrm2 = one(T) end
 
     r = copy(b)
-    # A_mul_B!(-one(T), A, x, one(T), r)
-    r[:] -= A*x
-    solve!(M, r)
+    A_mul_B!(-one(T), A, x, one(T), r)
+    # r = b - A*x
+    A_ldiv_B!(M, r)
+    # r[:] = M\r
     error = norm(r) / bnrm2
     if error < tol return x, error, iter, flag end
 
-    n = size(A, 1)                                  # initialize workspace
+    n = length(x)                               # initialize workspace
     m = restrt
     i = 1
     V = zeros(n,m+1)
@@ -238,17 +244,21 @@ function gmres{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstr
     w = zeros(n)
 
     for iter = 1:max_it                              # begin iteration
-        r[:] = b - A*x
-        # A_mul_B!(-one(T),A,x,one(T),r)
-        solve!(M, r)
+        r[:] = b
+        A_mul_B!(-one(T),A,x,one(T),r)
+        # r[:] = M\(b - A*x)
+        A_ldiv_B!(M, r)
         nrmr = norm(r)
-        V[:,1] = r/nrmr
+        for l = 1:n
+            V[l,1] = r[l]/nrmr
+        end
         fill!(s,zero(T))
         s[1] = nrmr
         for i = 1:m                                   # construct orthonormal
-            # A_mul_B!(one(T),A,sub(V,1:n,i),zero(T),w)
-            w[:] = A*sub(V,1:n,i)
-            solve!(M, w)                              # basis using Gram-Schmidt
+            A_mul_B!(one(T),A,sub(V,1:n,i),zero(T),w)
+            # w[:] = A*sub(V,1:n,i)
+            A_ldiv_B!(M, w)                              # basis using Gram-Schmidt
+            # w[:] = M\(A*sub(V,1:n,i))
             for k = 1:i
                 H[k,i] = dot(w, sub(V,1:n,k))
                 for l = 1:n
@@ -289,9 +299,10 @@ function gmres{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstr
                 x[lo] += V[lo,li]*y[li]               # update approximation
             end
         end
-        r[:] = b - A*x                                     # compute residual
-        # A_mul_B!(-one(T),A,x,one(T),r)
-        solve!(M, r)
+        r[:] = b
+        A_mul_B!(-one(T),A,x,one(T),r)
+        A_ldiv_B!(M, r)
+        # r[:] = M\(b - A*x)
         s[i+1] = norm(r)
         error = s[i+1]/bnrm2                          # check convergence
         if error <= tol break end
@@ -301,20 +312,22 @@ function gmres{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstr
     return x, error, iter, flag
 end
 
-function rotmat(a::Real, b::Real)
+function rotmat{T<:Real}(a::T, b::T)
 #
 # Compute the Givens rotation matrix parameters for a and b.
 #
-    if b == 0.0
-        return 1.0, 0.0
+    if b == 0
+        return one(T), zero(T)
     elseif abs(b) > abs(a)
         temp = a / b
-        s = 1.0 / sqrt(1.0 + temp*temp)
+        s = one(T) / sqrt(one(T) + temp*temp)
         return temp * s, s
     else
         temp = b / a
-        c = 1.0 / sqrt( 1.0 + temp*temp)
+        c = one(T) / sqrt( one(T) + temp*temp)
         return c, temp * c
     end
 end
+
+A_mul_B!(α::Number, f::Function, x::AbstractVector, β::Number, y::AbstractVector) = y[:] = α*f(x) + β*y
 end
