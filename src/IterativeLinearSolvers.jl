@@ -6,9 +6,14 @@ import Base.LinAlg: BlasReal, A_mul_B!
 
 export cgs, cg, gmres
 
-typealias Preconditioner{T} Union(AbstractMatrix{T}, Factorization{T})
+typealias Preconditioner{T} Union{AbstractMatrix{T}, Factorization{T}}
 
-function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::AbstractVector{T}, M::Preconditioner{T}, max_it::Integer, tol::Real)
+function cg{T<:BlasReal}(A::AbstractMatrix{T},
+    x::AbstractVector{T},
+    b::AbstractVector{T},
+    M::Preconditioner{T},
+    max_it::Integer,
+    tol::Real)
 #  -- Iterative template routine --
 #     Univ. of Tennessee and Oak Ridge National Laboratory
 #     October 1, 1993
@@ -20,7 +25,7 @@ function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstract
 #
 #  [x, error, iter, flag] = cg(A, x, b, M, max_it, tol)
 #
-# cg.m solves the symmetric positive definite linear system Ax=b 
+# cg.m solves the symmetric positive definite linear system Ax=b
 # using the Conjugate Gradient method with preconditioning.
 #
 # input   A        REAL symmetric positive definite matrix
@@ -43,6 +48,7 @@ function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstract
     bnrm2 = norm(b)
     if bnrm2 == 0.0 bnrm2 = one(T) end
 
+    local ρ₁
     z = zeros(T, n)
     q = zeros(T, n)
     p = zeros(T, n)
@@ -50,19 +56,21 @@ function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstract
     # A_mul_B!(-one(T),A,x,one(T),r)
     r = b - A*x
     error = norm(r)/bnrm2
-    if error < tol return end
+    if error < tol
+        return
+    end
 
     for iter = 1:max_it                       # begin iteration
 
         z[:] = r
         A_ldiv_B!(M, z)
         # z[:] = M\r
-        rho = dot(r,z)
+        ρ = dot(r,z)
 
         if iter > 1                       # direction vector
-            beta = rho/rho_1
+            β = ρ/ρ₁
             for l = 1:n
-                p[l] = z[l] + beta*p[l]
+                p[l] = z[l] + β*p[l]
             end
         else
             p[:] = z
@@ -70,16 +78,16 @@ function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstract
 
         # A_mul_B!(one(T),A,p,zero(T),q)
         q[:] = A*p
-        alpha = rho / dot(p,q)
+        α = ρ / dot(p,q)
         for l = 1:n
-            x[l] += alpha*p[l]                    # update approximation vector
-            r[l] -= alpha*q[l]                    # compute residual
+            x[l] += α*p[l]                    # update approximation vector
+            r[l] -= α*q[l]                    # compute residual
         end
-                        
-        error = norm(r)/bnrm2                     # check convergence
-        if error <= tol break end 
 
-        rho_1 = rho
+        error = norm(r)/bnrm2                     # check convergence
+        if error <= tol break end
+
+        ρ₁ = ρ
 
     end
 
@@ -87,7 +95,12 @@ function cg{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstract
     return x, error, iter, flag
 end
 
-function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::AbstractVector{T}, M::Preconditioner{T}, max_it::Integer, tol::Real)
+function cgs{T<:BlasReal}(A::AbstractMatrix{T},
+    x::AbstractVector{T},
+    b::AbstractVector{T},
+    M::Preconditioner{T},
+    max_it::Integer,
+    tol::Real)
 #  -- Iterative template routine --
 #     Univ. of Tennessee and Oak Ridge National Laboratory
 #     October 1, 1993
@@ -99,7 +112,7 @@ function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstrac
 #
 #  [x, error, iter, flag] = cgs(A, x, b, M, max_it, tol)
 #
-# cgs.m solves the linear system Ax=b using the 
+# cgs.m solves the linear system Ax=b using the
 # Conjugate Gradient Squared Method with preconditioning.
 #
 # input   A        REAL matrix
@@ -124,11 +137,12 @@ function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstrac
 
     u = zeros(T, n)
     p = zeros(T, n)
-    p_hat = zeros(T, n)
+    p̂ = zeros(T, n)
     q = zeros(T, n)
-    u_hat = zeros(T,n)
-    v_hat = zeros(T, n)
-    rho = zero(T)
+    û = zeros(T,n)
+    v̂ = zeros(T, n)
+    ρ = zero(T)
+    ρ₁ = ρ
     r = copy(b)
     A_mul_B!(-one(T),A,x,one(T),r)
     # r = b - A*x
@@ -140,49 +154,49 @@ function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstrac
 
     for iter = 1:max_it                    # begin iteration
 
-        rho = dot(r_tld,r)
-        if rho == 0.0 break end
+        ρ = dot(r_tld,r)
+        if ρ == 0.0 break end
 
         if iter > 1                     # direction vectors
-            beta = rho/rho_1
+            β = ρ/ρ₁
             for l = 1:n
-                u[l] = r[l] + beta*q[l]
-                p[l] = u[l] + beta*(q[l] + beta*p[l])
+                u[l] = r[l] + β*q[l]
+                p[l] = u[l] + β*(q[l] + β*p[l])
             end
         else
             u[:] = r
             p[:] = u
         end
 
-        p_hat[:] = p
-        A_ldiv_B!(M, p_hat)
-        # p_hat[:] = M\p
-        A_mul_B!(one(T),A,p_hat,zero(T),v_hat)    # adjusting scalars
-        # v_hat[:] = A*p_hat
-        alpha = rho/dot(r_tld,v_hat)
+        p̂[:] = p
+        A_ldiv_B!(M, p̂)
+        # p̂[:] = M\p
+        A_mul_B!(one(T),A,p̂,zero(T),v̂)    # adjusting scalars
+        # v̂[:] = A*p̂
+        α = ρ/dot(r_tld,v̂)
         for l = 1:n
-            q[l] = u[l] - alpha*v_hat[l]
-            u_hat[l] = u[l] + q[l]
+            q[l] = u[l] - α*v̂[l]
+            û[l] = u[l] + q[l]
         end
-        A_ldiv_B!(M, u_hat)
-        # u_hat[:] = M\u_hat
+        A_ldiv_B!(M, û)
+        # û[:] = M\û
 
         for l = 1:n
-            x[l] += alpha*u_hat[l]                 # update approximation
+            x[l] += α*û[l]                 # update approximation
         end
 
-        A_mul_B!(-alpha,A,u_hat,one(T),r)
-        # r[:] -= alpha*(A*u_hat)
+        A_mul_B!(-α,A,û,one(T),r)
+        # r[:] -= α*(A*û)
         error = norm(r)/bnrm2           # check convergence
         if error <= tol break end
 
-        rho_1 = rho
+        ρ₁ = ρ
 
     end
 
     if error <= tol                      # converged
         flag = 0
-    elseif rho == 0.0                  # breakdown
+    elseif ρ == 0.0                  # breakdown
         flag = -1
     else                                    # no convergence
         flag = 1
@@ -190,7 +204,12 @@ function cgs{T<:BlasReal}(A::AbstractMatrix{T}, x::AbstractVector{T}, b::Abstrac
     return x, error, iter, flag
 end
 
-function gmres{T<:BlasReal}(A::Any, b::AbstractVector{T}, x::AbstractVector{T} = randn(length(b)), M::Any = eye(Diagonal{T}, length(b)), restrt::Integer = length(b)|>t->min(t-1,int(10log10(t))), max_it::Integer = 1000, tol::Real = eps())
+function gmres{T<:BlasReal}(A::Any,
+    b::AbstractVector{T},
+    x::AbstractVector{T} = randn(length(b)),
+    M::Any = eye(Diagonal{T}, length(b)),
+    restrt::Integer = length(b) |> t -> min(t - 1, int(10log10(t))),
+    max_it::Integer = 1000, tol::Real = eps())
 #  -- Iterative template routine --
 #     Univ. of Tennessee and Oak Ridge National Laboratory
 #     October 1, 1993
