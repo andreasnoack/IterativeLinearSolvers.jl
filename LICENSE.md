@@ -1,4 +1,4 @@
-Copyright (c) 2013, Andreas Noack Jensen
+Copyright (c) 2013, Andreas Noack
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
